@@ -36,10 +36,10 @@ fn convert_with_libreoffice(input: &str, output_dir: &str) -> anyhow::Result<()>
 pub async fn convert_base64_pdf(docx_base64: &str) -> anyhow::Result<String> {
     let tmp_dir = TempDir::new()?;
     let tmp_docx_path = format!("{}/tmp.docx", tmp_dir.path().display());
-    let tmp_pdf_path = format!("{}/tmp.docx", tmp_dir.path().display());
+    let tmp_pdf_path = format!("{}/tmp.pdf", tmp_dir.path().display());
     let tmp_dir_path = format!("{}", tmp_dir.path().display());
 
-    base64_to_file(&docx_base64, &tmp_docx_path).await?;
+    base64_to_file(docx_base64, &tmp_docx_path).await?;
     let _ = tokio::task::spawn_blocking(move || {
         convert_with_libreoffice(&tmp_docx_path, &tmp_dir_path)
     })
@@ -48,13 +48,13 @@ pub async fn convert_base64_pdf(docx_base64: &str) -> anyhow::Result<String> {
     Ok(output_base64)
 }
 
-async fn base64_to_file(base64_str: &str, file_path: &str) -> anyhow::Result<()> {
+pub async fn base64_to_file(base64_str: &str, file_path: &str) -> anyhow::Result<()> {
     let decoded_data = general_purpose::STANDARD.decode(base64_str)?;
     fs::write(file_path, decoded_data).await?;
     Ok(())
 }
 
-async fn file_to_base64(file_path: &str) -> anyhow::Result<String> {
+pub async fn file_to_base64(file_path: &str) -> anyhow::Result<String> {
     // Read file as bytes
     let file_data = fs::read(file_path)
         .await

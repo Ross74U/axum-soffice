@@ -50,7 +50,7 @@ async fn worker(
     receiver: Arc<Mutex<mpsc::UnboundedReceiver<ProcessingRequest>>>,
     active_counter: Arc<AtomicUsize>,
 ) {
-    println!("worker {} started", worker_id);
+    println!("worker {} started", worker_id + 1);
 
     loop {
         let processing_request = {
@@ -58,9 +58,10 @@ async fn worker(
             channel_rx.recv().await
         };
 
-        println!("{} active workers", active_counter.display_value());
         if let Some(request) = processing_request {
             active_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            println!("{} active workers", active_counter.display_value());
+
             match soffice::convert_base64_pdf(&request.docx_base64).await {
                 Ok(pdf_base64) => {
                     let _ = request.response_tx.send(Ok(pdf_base64));

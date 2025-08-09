@@ -1,6 +1,7 @@
 mod queue;
 mod soffice;
-
+#[cfg(test)]
+mod test;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -8,9 +9,24 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use queue::QueueProcessor;
 use std::sync::Arc;
 
-use queue::QueueProcessor;
+#[tokio::main]
+async fn main() {
+    let app = create_app(5);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
+    println!("Axum server running on http://localhost:8000");
+    axum::serve(listener, app).await.unwrap();
+}
+
+fn create_app(num_workers: usize) -> Router {
+    let queue_processor = Arc::new(QueueProcessor::new(num_workers).unwrap());
+    Router::new()
+        .route("/", get(health))
+        .route("/convertb64", post(convertb64))
+        .with_state(queue_processor)
+}
 
 async fn health() -> &'static str {
     "running!"
@@ -22,20 +38,6 @@ async fn convertb64(
 ) -> Result<String, AppError> {
     let result = queue_processor.process_base64(body).await?;
     Ok(result)
-}
-
-#[tokio::main]
-async fn main() {
-    let queue_processor = Arc::new(QueueProcessor::new(5).unwrap());
-
-    let app = Router::new()
-        .route("/", get(health))
-        .route("/convertb64", post(convertb64))
-        .with_state(queue_processor);
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
-    println!("Axum server running on http://localhost:8000");
-    axum::serve(listener, app).await.unwrap();
 }
 
 // Make our own error that wraps `anyhow::Error`.
