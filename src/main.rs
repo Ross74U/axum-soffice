@@ -10,13 +10,35 @@ use axum::{
     Router,
 };
 use queue::QueueProcessor;
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = env::args().collect();
+    let mut port = String::from("8000");
+    let mut addr = String::from("0.0.0.0");
+    if args.len() > 1 {
+        // read bind address and port from arguments
+        if args.len() % 2 == 0 {
+            panic!("There should be an even number of arguments.");
+        }
+        for arg_num in 1..args.len() {
+            if arg_num % 2 == 0 {
+                continue;
+            } else if args[arg_num] == "--port" {
+                port = args[arg_num + 1].clone();
+            } else if args[arg_num] == "--addr" {
+                addr = args[arg_num + 1].clone();
+            } else {
+                panic!("Unknown argument {}", args[arg_num]);
+            }
+        }
+    }
     let app = create_app(5);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
-    println!("Axum server running on http://localhost:8000");
+    let listener = tokio::net::TcpListener::bind(format!("{}:{}", addr, port))
+        .await
+        .unwrap();
+    println!("Axum server running on http://{}:{}", addr, port);
     axum::serve(listener, app).await.unwrap();
 }
 
