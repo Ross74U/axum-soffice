@@ -15,10 +15,14 @@ FROM debian:bookworm-slim
 RUN apt-get update \
   && apt-get install -y \
      ca-certificates \
-     libreoffice \
+     libreoffice-core \
+     libreoffice-writer \
+     libreoffice-common \
+     ure \
+     fonts-dejavu \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/tokio-pdf /usr/local/bin/tokio-pdf
 
-EXPOSE 3000
-CMD ["tokio-pdf --port 3000"]
+EXPOSE 4000
+CMD ["tokio-pdf", "--port", "4000"]
