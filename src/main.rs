@@ -51,6 +51,7 @@ fn create_app(num_workers: usize) -> Router {
 }
 
 async fn health() -> &'static str {
+    println!("/ health check");
     "running!"
 }
 

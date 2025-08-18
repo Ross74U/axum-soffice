@@ -20,6 +20,7 @@ RUN apt-get update \
      libreoffice-common \
      ure \
      fonts-dejavu \
+     curl \    
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/tokio-pdf /usr/local/bin/tokio-pdf
