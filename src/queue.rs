@@ -7,8 +7,23 @@ use std::sync::{
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 struct ProcessingRequest {
-    docx_base64: String,
-    response_tx: oneshot::Sender<anyhow::Result<String>>,
+    input: ProcessingInput,
+    response_tx: oneshot::Sender<anyhow::Result<ProcessingResponse>>,
+}
+
+enum ProcessingInput {
+    Base64String(String),
+    FilePathInput(FilePathInput),
+}
+
+struct FilePathInput {
+    tmp_docx_path: String,
+    tmp_dir_path: String,
+}
+
+enum ProcessingResponse {
+    FilePathConverted,
+    Base64String(String),
 }
 
 pub struct QueueProcessor {
@@ -29,15 +44,46 @@ impl QueueProcessor {
         Ok(Self { sender })
     }
 
-    pub async fn process_base64(&self, docx_base64: String) -> anyhow::Result<String> {
+    pub async fn process_file_path(
+        &self,
+        tmp_docx_path: &str,
+        tmp_dir_path: &str,
+    ) -> anyhow::Result<()> {
         let (response_tx, response_rx) = oneshot::channel();
+        let input = FilePathInput {
+            tmp_docx_path: tmp_docx_path.to_string(),
+            tmp_dir_path: tmp_dir_path.to_string(),
+        };
         let request = ProcessingRequest {
-            docx_base64,
+            input: ProcessingInput::FilePathInput(input),
             response_tx,
         };
         self.sender.send(request)?;
         match response_rx.await {
-            Ok(result) => result,
+            Ok(result) => match result {
+                Ok(ProcessingResponse::FilePathConverted) => Ok(()),
+                Ok(_) => Err(anyhow::anyhow!("Expected FilePathConverted")),
+                Err(e) => Err(e),
+            },
+            Err(_) => {
+                anyhow::bail!("worker disconnected before sending result");
+            }
+        }
+    }
+
+    pub async fn process_base64(&self, docx_base64: String) -> anyhow::Result<String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let request = ProcessingRequest {
+            input: ProcessingInput::Base64String(docx_base64),
+            response_tx,
+        };
+        self.sender.send(request)?;
+        match response_rx.await {
+            Ok(result) => match result {
+                Ok(ProcessingResponse::Base64String(s)) => Ok(s),
+                Ok(_) => Err(anyhow::anyhow!("Expected FilePathConverted")),
+                Err(e) => Err(e),
+            },
             Err(_) => {
                 anyhow::bail!("worker disconnected before sending result");
             }
@@ -58,19 +104,31 @@ async fn worker(
             channel_rx.recv().await
         };
 
-        if let Some(request) = processing_request {
+        if let Some(req) = processing_request {
             active_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             println!("{} active workers", active_counter.display_value());
 
-            match soffice::convert_base64_pdf(&request.docx_base64).await {
-                Ok(pdf_base64) => {
-                    let _ = request.response_tx.send(Ok(pdf_base64));
+            let result = match req.input {
+                ProcessingInput::Base64String(docx_base64) => {
+                    match soffice::convert_base64_pdf(&docx_base64).await {
+                        Ok(pdf_string) => Ok(ProcessingResponse::Base64String(pdf_string)),
+                        Err(e) => Err(e),
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Error occured on worker_id {}: {}", worker_id, e);
-                    let _ = request.response_tx.send(Err(e));
+                ProcessingInput::FilePathInput(file_path_input) => {
+                    match soffice::convert_file_path(
+                        &file_path_input.tmp_docx_path,
+                        &file_path_input.tmp_dir_path,
+                    )
+                    .await
+                    {
+                        Ok(_) => Ok(ProcessingResponse::FilePathConverted),
+                        Err(e) => Err(e),
+                    }
                 }
-            }
+            };
+
+            _ = req.response_tx.send(result);
             active_counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         };
     }

@@ -33,6 +33,12 @@ fn convert_with_libreoffice(input: &str, output_dir: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+pub async fn convert_file_path(docx_path: &str, dir_path: &str) -> anyhow::Result<()> {
+    let docx_path = String::from(docx_path);
+    let dir_path = String::from(dir_path);
+    tokio::task::spawn_blocking(move || convert_with_libreoffice(&docx_path, &dir_path)).await?
+}
+
 pub async fn convert_base64_pdf(docx_base64: &str) -> anyhow::Result<String> {
     let tmp_dir = TempDir::new()?;
     let tmp_docx_path = format!("{}/tmp.docx", tmp_dir.path().display());
