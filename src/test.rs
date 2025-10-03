@@ -13,7 +13,7 @@ async fn start_test_server() -> String {
 }
 
 #[tokio::test]
-async fn load_test() {
+async fn load_test_b64() {
     let max_concurrent: usize = 10;
     let total_requests: usize = 30;
     let file_path = "docs/text-and-image.docx";
@@ -34,7 +34,6 @@ async fn load_test() {
         let body = base64_docx_bytes.clone();
 
         let handle = tokio::spawn(async move {
-            println!("request {}", client_id);
             let _permit = semaphore.acquire().await.unwrap();
             println!("starting request {}", client_id);
 
@@ -45,12 +44,20 @@ async fn load_test() {
                 .await
                 .unwrap();
 
-            let base64_pdf = res.text().await.unwrap();
-            soffice::base64_to_file(&base64_pdf, &format!("results/{}.pdf", client_id))
-                .await
-                .unwrap();
+            if res.status().is_success() {
+                let base64_pdf = res.text().await.unwrap();
+                soffice::base64_to_file(&base64_pdf, &format!("results/{}.pdf", client_id))
+                    .await
+                    .unwrap();
 
-            println!("request {} completed successfully", client_id);
+                println!("request {} completed successfully", client_id);
+            } else {
+                // Try to get the response body for more details
+                if let Ok(error_text) = res.text().await {
+                    println!("Server error: {}", error_text);
+                }
+                panic!("Server responded with unsuccessful status");
+            }
         });
         client_handles.push(handle);
     }

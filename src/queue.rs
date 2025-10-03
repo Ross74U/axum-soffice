@@ -39,7 +39,8 @@ impl QueueProcessor {
         for worker_id in 0..num_workers {
             let receiver = Arc::clone(&shared_receiver);
             let active_counter = Arc::clone(&active_counter);
-            tokio::spawn(async move { worker(worker_id, receiver, active_counter).await });
+            let port = 20000 + worker_id as u16;
+            tokio::spawn(async move { worker(worker_id, receiver, active_counter, port).await });
         }
         Ok(Self { sender })
     }
@@ -95,8 +96,11 @@ async fn worker(
     worker_id: usize,
     receiver: Arc<Mutex<mpsc::UnboundedReceiver<ProcessingRequest>>>,
     active_counter: Arc<AtomicUsize>,
+    port: u16,
 ) {
-    println!("worker {} started", worker_id + 1);
+    let _child = soffice::start_unoserver_daemon(port).expect("Unable to start libreoffice daemon");
+
+    println!("worker {} started on port {}", worker_id + 1, port);
 
     loop {
         let processing_request = {
@@ -110,7 +114,7 @@ async fn worker(
 
             let result = match req.input {
                 ProcessingInput::Base64String(docx_base64) => {
-                    match soffice::convert_base64_pdf(&docx_base64).await {
+                    match soffice::convert_base64_pdf(&docx_base64, port).await {
                         Ok(pdf_string) => Ok(ProcessingResponse::Base64String(pdf_string)),
                         Err(e) => Err(e),
                     }
@@ -119,6 +123,7 @@ async fn worker(
                     match soffice::convert_file_path(
                         &file_path_input.tmp_docx_path,
                         &file_path_input.tmp_dir_path,
+                        port,
                     )
                     .await
                     {
