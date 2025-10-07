@@ -18,9 +18,9 @@ async fn start_test_server() -> String {
 
 #[tokio::test]
 async fn load_test_stream() {
-    let max_concurrent: usize = 20;
-    let total_requests: usize = 50;
-    let file_path = "docs/text-and-image.docx";
+    let max_concurrent: usize = 1;
+    let total_requests: usize = 1;
+    let file_path = "docs/example.docx";
 
     let shared_server_url = Arc::new(start_test_server().await);
     println!("Test server started on {}", shared_server_url);

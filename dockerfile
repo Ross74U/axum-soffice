@@ -25,5 +25,7 @@ RUN apt-get update \
 
 COPY --from=builder /app/target/release/tokio-pdf /usr/local/bin/tokio-pdf
 
+ENV DOCX2PDF_RS_COMMAND="docx2rs_pdf"
+
 EXPOSE 4000
 CMD ["tokio-pdf", "--port", "4000"]

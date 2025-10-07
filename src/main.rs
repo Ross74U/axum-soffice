@@ -1,22 +1,20 @@
 mod queue;
+mod queue_processor; // trait for any queue-based service with channels
 mod soffice;
+mod stream_handler;
 #[cfg(test)]
 mod test;
+
 use axum::{
-    body::Body,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
-use futures::StreamExt;
 use queue::QueueProcessor;
 use std::{env, sync::Arc};
-use tempfile::TempDir;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tokio_util::io::ReaderStream;
+use stream_handler::convert_stream_handler;
 
 #[tokio::main]
 async fn main() {
@@ -68,56 +66,6 @@ async fn convertb64_handler(
 ) -> Result<String, AppError> {
     let result = queue_processor.process_base64(body).await?;
     Ok(result)
-}
-
-// --- Custom response type that holds both file reader and tempdir
-struct TempFileResponse {
-    _tmp_dir: TempDir, // ensures directory isn't deleted early
-    body: Body,        // streaming response
-}
-
-impl IntoResponse for TempFileResponse {
-    fn into_response(self) -> Response {
-        (
-            [(axum::http::header::CONTENT_TYPE, "application/pdf")],
-            self.body,
-        )
-            .into_response()
-    }
-}
-
-async fn convert_stream_handler(
-    State(queue_processor): State<Arc<QueueProcessor>>,
-    body: Body,
-) -> Result<impl IntoResponse, AppError> {
-    let mut stream = body.into_data_stream();
-    let tmp_dir = TempDir::new()?;
-    let tmp_docx_path = tmp_dir.path().join("tmp.docx");
-    let tmp_pdf_path = tmp_dir.path().join("tmp.pdf");
-
-    let mut docx_file = File::create(&tmp_docx_path).await?;
-
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result?;
-        docx_file.write_all(&chunk).await?;
-    }
-
-    queue_processor
-        .process_file_path(
-            tmp_docx_path.to_str().unwrap(),
-            tmp_dir.path().to_str().unwrap(),
-        )
-        .await?;
-
-    let pdf_file = File::open(&tmp_pdf_path).await?;
-    let pdf_stream = ReaderStream::new(pdf_file);
-    let body = Body::from_stream(pdf_stream);
-
-    // Return wrapper that keeps TempDir alive until stream is dropped
-    Ok(TempFileResponse {
-        _tmp_dir: tmp_dir,
-        body,
-    })
 }
 
 // Make our own error that wraps `anyhow::Error`.
