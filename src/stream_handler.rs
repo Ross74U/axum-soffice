@@ -1,3 +1,4 @@
+use crate::quickconvert::QuickConvertRequest;
 use crate::soffice::{FilePathInput, SofficeRequest, SofficeResponse};
 use crate::{AppError, AppState};
 use axum::{
@@ -54,16 +55,21 @@ pub async fn convert_stream_handler(
 
     if queries.llm_audience.is_some_and(|x| x) {
         // use quick convert queue for llm audience
+        let req = QuickConvertRequest {
+            input_path: tmp_docx_path.to_str().unwrap().to_string(),
+            output_path: tmp_pdf_path.to_str().unwrap().to_string(),
+        };
+        app_state.quick_queue.process_in_queue(req).await??;
     } else {
         // regular soffice queue
         let file_path_input = FilePathInput {
             docx: tmp_docx_path.to_str().unwrap().to_string(),
             dir: tmp_dir.path().to_str().unwrap().to_string(),
         };
-        let request = SofficeRequest::FilePathInput(file_path_input);
+        let req = SofficeRequest::FilePathInput(file_path_input);
         let SofficeResponse::FilePathConverted = app_state
             .soffice_queue
-            .process_in_queue(request).await??
+            .process_in_queue(req).await??
         else {
             return Err(anyhow::anyhow!("impossible response variant").into());
         };

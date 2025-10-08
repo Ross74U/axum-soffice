@@ -1,4 +1,5 @@
 mod queue_processor; // trait for any queue-based service with channels
+mod quickconvert;
 mod soffice;
 mod stream_handler;
 #[cfg(test)]
@@ -15,13 +16,14 @@ use axum::{
 };
 use queue_processor::QueueProcessor;
 use soffice::{SofficeQueueHandler, SofficeRequest, SofficeResponse};
+use quickconvert::{QuickQueueHandler, QuickConvertRequest};
 use std::{env, sync::Arc};
 use stream_handler::convert_stream_handler;
 
 #[derive(Clone)]
 struct AppState {
     soffice_queue: Arc<QueueProcessor<SofficeRequest, Result<SofficeResponse>>>,
-    // todo impl fast llm queue
+    quick_queue: Arc<QueueProcessor<QuickConvertRequest, Result<()>>>,
 }
 
 #[tokio::main]
@@ -46,7 +48,7 @@ async fn main() {
             }
         }
     }
-    let app = create_app(5);
+    let app = create_app(5, 5);
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", addr, port))
         .await
         .unwrap();
@@ -54,10 +56,12 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn create_app(soffice_workers: usize) -> Router {
+fn create_app(soffice_workers: usize, quick_workers: usize) -> Router {
     let soffice_handler = SofficeQueueHandler::new();
     let soffice_queue = Arc::new(QueueProcessor::new(soffice_workers, soffice_handler));
-    let app_state = AppState { soffice_queue };
+    let quick_handler = QuickQueueHandler::new();
+    let quick_queue = Arc::new(QueueProcessor::new(quick_workers, quick_handler));
+    let app_state = AppState { soffice_queue,  quick_queue};
     Router::new()
         .route("/", get(health))
         .route("/convertb64", post(convertb64_handler))
