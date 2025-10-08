@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
@@ -17,10 +17,10 @@ pub struct QueueProcessor<Req, Res> {
 
 impl<Req, Res> QueueProcessor<Req, Res>
 where
-    Req: Send + Sync + 'static,
+    Req: Send + 'static,
     Res: Send + 'static,
 {
-    fn new<H>(num_workers: usize, handler: H) -> Self
+    pub fn new<H>(num_workers: usize, handler: H) -> Self
     where
         H: Handler<Req, Res> + Send + 'static,
     {
@@ -50,7 +50,7 @@ where
         }
     }
 
-    async fn process_in_queue(&self, request: Req) -> Result<Res> {
+    pub async fn process_in_queue(&self, request: Req) -> Result<Res> {
         let (response_tx, response_rx): (oneshot::Sender<Res>, oneshot::Receiver<Res>) =
             oneshot::channel();
 
@@ -59,29 +59,10 @@ where
             response_tx,
         };
 
-        self.sender.send(request)?;
+        self.sender
+            .send(request)
+            .map_err(|_| anyhow!("failed to send request"))?;
         Ok(response_rx.await?)
-    }
-}
-
-/* Example Usage */
-/* no macro */
-#[derive(Clone)]
-struct ExampleHandler {}
-
-struct ExampleRequest {
-    input: String,
-}
-
-struct ExampleResponse {
-    output: String,
-}
-
-impl Handler<ExampleRequest, ExampleResponse> for ExampleHandler {
-    async fn process(&self, req: ExampleRequest) -> ExampleResponse {
-        ExampleResponse {
-            output: format!("Processed {}", req.input),
-        }
     }
 }
 
@@ -95,10 +76,15 @@ impl Handler<ExampleRequest, ExampleResponse> for ExampleHandler {
 ///   }
 ///});
 ///```
-macro_rules! handler {
-    ($name:ident, ($arg:ident: $req:ty) -> $res:ty $handler:block) => {
+#[macro_export]
+macro_rules! queue_handler {
+    ($vis:vis $name:ident, ($arg:ident: $req:ty) -> $res:ty $handler:block) => {
         #[derive(Clone)]
-        struct $name {}
+        $vis struct $name {}
+
+        impl $name {
+            pub fn new() -> Self { Self {} }
+        }
 
         impl Handler<$req, $res> for $name {
             async fn process(&self, $arg: $req) -> $res {

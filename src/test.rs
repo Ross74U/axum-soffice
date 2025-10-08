@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 use reqwest::Body;
 use std::time::Instant;
 use tokio::fs::File;
@@ -55,6 +55,8 @@ async fn load_test_stream() {
                 .await
                 .unwrap();
 
+            println!("received response from server");
+
             if res.status().is_success() {
                 // e.g. server streams PDF back as raw bytes
                 let pdf_bytes = res.bytes().await.unwrap();
@@ -96,7 +98,7 @@ async fn load_test_b64() {
 
     // create client requests
     let shared_client = Arc::new(reqwest::Client::new());
-    let base64_docx_bytes = bytes::Bytes::from(soffice::file_to_base64(file_path).await.unwrap());
+    let base64_docx_bytes = bytes::Bytes::from(utils::file_to_base64(file_path).await.unwrap());
     let mut client_handles = vec![];
     let shared_semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
 
@@ -119,7 +121,7 @@ async fn load_test_b64() {
 
             if res.status().is_success() {
                 let base64_pdf = res.text().await.unwrap();
-                soffice::base64_to_file(&base64_pdf, &format!("results/{}.pdf", client_id))
+                utils::base64_to_file(&base64_pdf, &format!("results/{}.pdf", client_id))
                     .await
                     .unwrap();
 
