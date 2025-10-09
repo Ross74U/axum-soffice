@@ -1,22 +1,30 @@
-mod queue;
+mod queue_processor; // trait for any queue-based service with channels
+mod quickconvert;
 mod soffice;
+mod stream_handler;
 #[cfg(test)]
 mod test;
+mod utils;
+
+use anyhow::Result;
 use axum::{
-    body::Body,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
-use futures::StreamExt;
-use queue::QueueProcessor;
+use queue_processor::QueueProcessor;
+use soffice::{SofficeQueueHandler, SofficeRequest, SofficeResponse};
+use quickconvert::{QuickQueueHandler, QuickConvertRequest};
 use std::{env, sync::Arc};
-use tempfile::TempDir;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tokio_util::io::ReaderStream;
+use stream_handler::convert_stream_handler;
+
+#[derive(Clone)]
+struct AppState {
+    soffice_queue: Arc<QueueProcessor<SofficeRequest, Result<SofficeResponse>>>,
+    quick_queue: Arc<QueueProcessor<QuickConvertRequest, Result<()>>>,
+}
 
 #[tokio::main]
 async fn main() {
@@ -40,7 +48,7 @@ async fn main() {
             }
         }
     }
-    let app = create_app(5);
+    let app = create_app(5, 5);
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", addr, port))
         .await
         .unwrap();
@@ -48,13 +56,17 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn create_app(num_workers: usize) -> Router {
-    let queue_processor = Arc::new(QueueProcessor::new(num_workers).unwrap());
+fn create_app(soffice_workers: usize, quick_workers: usize) -> Router {
+    let soffice_handler = SofficeQueueHandler::new();
+    let soffice_queue = Arc::new(QueueProcessor::new(soffice_workers, soffice_handler));
+    let quick_handler = QuickQueueHandler::new();
+    let quick_queue = Arc::new(QueueProcessor::new(quick_workers, quick_handler));
+    let app_state = AppState { soffice_queue,  quick_queue};
     Router::new()
         .route("/", get(health))
         .route("/convertb64", post(convertb64_handler))
         .route("/convert_stream", post(convert_stream_handler))
-        .with_state(queue_processor)
+        .with_state(app_state)
 }
 
 async fn health() -> &'static str {
@@ -63,67 +75,20 @@ async fn health() -> &'static str {
 }
 
 async fn convertb64_handler(
-    State(queue_processor): State<Arc<QueueProcessor>>,
+    State(app_state): State<AppState>,
     body: String,
 ) -> Result<String, AppError> {
-    let result = queue_processor.process_base64(body).await?;
+    let request = SofficeRequest::Base64String(body);
+    let SofficeResponse::Base64String(result) =
+        app_state.soffice_queue.process_in_queue(request).await?? 
+    else {
+        return Err(anyhow::anyhow!("what, impossible response variant").into());
+    };
+
     Ok(result)
 }
 
-// --- Custom response type that holds both file reader and tempdir
-struct TempFileResponse {
-    _tmp_dir: TempDir, // ensures directory isn't deleted early
-    body: Body,        // streaming response
-}
-
-impl IntoResponse for TempFileResponse {
-    fn into_response(self) -> Response {
-        (
-            [(axum::http::header::CONTENT_TYPE, "application/pdf")],
-            self.body,
-        )
-            .into_response()
-    }
-}
-
-async fn convert_stream_handler(
-    State(queue_processor): State<Arc<QueueProcessor>>,
-    body: Body,
-) -> Result<impl IntoResponse, AppError> {
-    let mut stream = body.into_data_stream();
-    let tmp_dir = TempDir::new()?;
-    let tmp_docx_path = tmp_dir.path().join("tmp.docx");
-    let tmp_pdf_path = tmp_dir.path().join("tmp.pdf");
-
-    let mut docx_file = File::create(&tmp_docx_path).await?;
-
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result?;
-        docx_file.write_all(&chunk).await?;
-    }
-
-    queue_processor
-        .process_file_path(
-            tmp_docx_path.to_str().unwrap(),
-            tmp_dir.path().to_str().unwrap(),
-        )
-        .await?;
-
-    let pdf_file = File::open(&tmp_pdf_path).await?;
-    let pdf_stream = ReaderStream::new(pdf_file);
-    let body = Body::from_stream(pdf_stream);
-
-    // Return wrapper that keeps TempDir alive until stream is dropped
-    Ok(TempFileResponse {
-        _tmp_dir: tmp_dir,
-        body,
-    })
-}
-
-// Make our own error that wraps `anyhow::Error`.
 struct AppError(anyhow::Error);
-
-// Tell axum how to convert `AppError` into a response.
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         (
@@ -133,8 +98,6 @@ impl IntoResponse for AppError {
             .into_response()
     }
 }
-// This enables using `?` on functions that return `Result<_, anyhow::Error>` to turn them into
-// `Result<_, AppError>`. That way you don't need to do that manually.
 impl<E> From<E> for AppError
 where
     E: Into<anyhow::Error>,
